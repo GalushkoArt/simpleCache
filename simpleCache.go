@@ -12,6 +12,11 @@ type SimpleCache interface {
 	Delete(key string) *interface{}
 }
 
+type ExpiryCache interface {
+	SimpleCache
+	SetWithExpiry(key string, nano int64, value interface{})
+}
+
 type simpleMapCache struct {
 	storage map[string]interface{}
 }
@@ -95,7 +100,7 @@ func stopPurifier(p *purifier) {
 
 // NewConcurrentCache returns concurrency cache with provided TTL
 // if ttl is zero cache won't be purified automatically
-func NewConcurrentCache(ttl time.Duration) SimpleCache {
+func NewConcurrentCache(ttl time.Duration) ExpiryCache {
 	c := &concurrencyMapCache{
 		storage: make(map[string]itemWithExpiration),
 		ttl:     ttl,
@@ -106,11 +111,18 @@ func NewConcurrentCache(ttl time.Duration) SimpleCache {
 }
 
 func (c *concurrencyMapCache) Set(key string, value interface{}) {
+	c.SetWithExpiry(key, time.Now().Add(c.ttl).UnixNano(), value)
+}
+
+func (c *concurrencyMapCache) SetWithExpiry(key string, nano int64, value interface{}) {
+	if nano < time.Now().UnixNano() {
+		return
+	}
 	c.mutex.Lock()
 	if c.ttl > 0 {
 		c.storage[key] = itemWithExpiration{
 			item:      value,
-			expiredAt: time.Now().Add(c.ttl).UnixNano(),
+			expiredAt: nano,
 		}
 	} else {
 		c.storage[key] = itemWithExpiration{item: value}
