@@ -11,6 +11,11 @@ type GenericCache[T interface{}] interface {
 	Delete(key string) *T
 }
 
+type ExpiryGenericCache[T interface{}] interface {
+	GenericCache[T]
+	SetWithExpiry(key string, nano int64, value T)
+}
+
 type genericMapCache[T interface{}] struct {
 	storage map[string]interface{}
 }
@@ -46,7 +51,7 @@ type concurrencyGenericMapCache[T interface{}] struct {
 
 // NewGenericConcurrentCache returns parametrized concurrency cache with provided TTL
 // if ttl is zero cache won't be purified automatically
-func NewGenericConcurrentCache[T interface{}](ttl time.Duration) GenericCache[T] {
+func NewGenericConcurrentCache[T interface{}](ttl time.Duration) ExpiryGenericCache[T] {
 	c := &concurrencyGenericMapCache[T]{
 		concurrencyMapCache{
 			storage: make(map[string]itemWithExpiration),
@@ -59,11 +64,18 @@ func NewGenericConcurrentCache[T interface{}](ttl time.Duration) GenericCache[T]
 }
 
 func (c *concurrencyGenericMapCache[T]) Set(key string, value T) {
+	c.SetWithExpiry(key, time.Now().Add(c.ttl).UnixNano(), value)
+}
+
+func (c *concurrencyGenericMapCache[T]) SetWithExpiry(key string, nano int64, value T) {
+	if nano < time.Now().UnixNano() {
+		return
+	}
 	c.mutex.Lock()
 	if c.ttl > 0 {
 		c.storage[key] = itemWithExpiration{
 			item:      value,
-			expiredAt: time.Now().Add(c.ttl).UnixNano(),
+			expiredAt: nano,
 		}
 	} else {
 		c.storage[key] = itemWithExpiration{item: value}
